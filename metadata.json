@@ -1,0 +1,5 @@
+{
+  "name": "Node.js Architecture Explorer",
+  "description": "An interactive guide to understanding the Node.js Event Loop and internal architecture.",
+  "requestFramePermissions": []
+}
