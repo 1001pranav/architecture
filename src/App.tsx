@@ -53,12 +53,14 @@ const ARCH_PARTS: ArchPart[] = [
   {
     id: 'v8',
     name: 'V8 Context',
-    description: 'The high-performance JavaScript engine developed by Google. It compiles JS directly to native machine code.',
+    description: 'JavaScript engine by Google. Uses a multi-stage pipeline — Ignition interprets JS as bytecode first; only hot functions are JIT-compiled to native machine code by TurboFan.',
     insights: [
-      'Ignition & TurboFan: The two-stage pipeline for interpreting and optimizing code.',
-      'Hidden Classes: How V8 optimizes property access in dynamic objects.',
-      'Memory Heap: Divided into New Space (Young Gen) and Old Space (Old Gen).',
-      'Write Barriers: Essential for the incremental marking phase of GC.'
+      'Ignition: Bytecode interpreter — all JS runs through Ignition first, producing compact bytecode before any optimization.',
+      'TurboFan: Optimizing JIT compiler — profiling data from Ignition identifies hot functions to re-compile as native code.',
+      'Sparkplug (Node 16+): A fast non-optimizing baseline compiler between Ignition and TurboFan that reduces JIT latency.',
+      'Hidden Classes: V8 creates internal "shapes" to make property access on dynamic objects as fast as C++ struct access.',
+      'Memory Heap: New Space (Young Gen, Scavenge GC — fast minor collections) and Old Space (Old Gen, Mark-Compact GC).',
+      'Write Barriers: Track cross-generational object references so the incremental/concurrent GC never misses live objects.'
     ],
     color: 'from-yellow-400 to-orange-500',
     icon: <Cpu className="w-6 h-6" />
@@ -66,12 +68,13 @@ const ARCH_PARTS: ArchPart[] = [
   {
     id: 'bindings',
     name: 'Node Bindings',
-    description: 'The C++ layer that bridges the gap between JavaScript and the underlying OS-level libraries.',
+    description: 'The C++ bridge between JavaScript and OS libraries. Sits between Node\'s built-in JS modules (lib/) and the underlying Libuv/V8 C++ layer.',
     insights: [
-      'libnode: The core C++ library that wraps V8 and Libuv.',
-      'Internal Bindings: Native modules like "tcp_wrap" and "fs_event_wrap".',
-      'Buffer Management: Zero-copy data sharing between JS and C++.',
-      'Addon API: Using node-addon-api for high-performance native extensions.'
+      'JS Layer (lib/): Built-in modules like fs.js, net.js, http.js are written in JavaScript and live above the C++ layer.',
+      'internalBinding(): The modern API (replaced deprecated process.binding()) used by lib/ to reach C++ built-in modules.',
+      'C++ Wrappers: Classes like TCPWrap, FSReqCallback, and StreamWrap bind Libuv handles to JS objects.',
+      'Buffer Management: Zero-copy data sharing between the JS heap and C++ via ArrayBuffer / BackingStore.',
+      'N-API / node-addon-api: ABI-stable native addon interface — addons compiled once run across Node versions.'
     ],
     color: 'from-green-400 to-emerald-600',
     icon: <Activity className="w-6 h-6" />
@@ -84,7 +87,7 @@ const ARCH_PARTS: ArchPart[] = [
       'uv_run: The entry point that starts the infinite loop.',
       'Handle vs Request: Handles are persistent (sockets), Requests are short-lived (file read).',
       'I/O Polling: Using epoll (Linux), kqueue (macOS), or IOCP (Windows).',
-      'Tick: A single iteration through all phases of the loop.'
+      'Loop iteration: One full pass through all phases. Do not confuse with process.nextTick() — that is a microtask hook, not a loop phase.'
     ],
     color: 'from-blue-400 to-indigo-600',
     icon: <RefreshCw className="w-6 h-6" />
@@ -92,12 +95,13 @@ const ARCH_PARTS: ArchPart[] = [
   {
     id: 'thread-pool',
     name: 'Thread Pool',
-    description: 'A pool of worker threads managed by Libuv to handle operations that would otherwise block the main loop.',
+    description: 'OS-level threads inside Libuv that execute blocking operations so the main event loop thread is never stalled waiting on the kernel.',
     insights: [
-      'Worker Threads: Offloading CPU-intensive or blocking synchronous I/O.',
-      'Task Queue: Tasks are queued and picked up by the next available worker.',
-      'UV_THREADPOOL_SIZE: Tuning this is critical for high-concurrency I/O apps.',
-      'Signal Handling: How workers notify the main loop of task completion.'
+      'What uses it: fs.* calls, dns.lookup() (getaddrinfo), crypto (pbkdf2, scrypt, randomBytes), and uv_queue_work().',
+      'dns.resolve() does NOT use the thread pool — it uses c-ares, a fully async DNS library with its own event handling.',
+      'Default size is 4 threads. Set UV_THREADPOOL_SIZE=N (max 1024) before Node starts to scale I/O-heavy apps.',
+      'Completion signalling: threads notify the event loop via an internal pipe or eventfd — not OS signals.',
+      'Not node:worker_threads — that module creates isolated V8 contexts with their own heaps, GC, and event loops.'
     ],
     color: 'from-purple-400 to-pink-600',
     icon: <HardDrive className="w-6 h-6" />
@@ -126,19 +130,37 @@ const EVENT_LOOP_PHASES: Phase[] = [
   {
     id: 'pending',
     name: 'Pending Callbacks',
-    description: 'Executes I/O callbacks deferred from the previous loop iteration.',
+    description: 'Executes OS-level callbacks that Libuv intentionally deferred to the next loop iteration — not a spillover from Poll.',
     details: [
-      'Handles system-level errors (like TCP errors).',
-      'Callbacks that were not executed in the previous Poll phase.'
+      'Specifically handles deferred system error callbacks, not general I/O overflow.',
+      'Example: TCP ECONNREFUSED on Linux/macOS is reported one full iteration after it occurs.'
     ],
     seniorInsights: [
-      'This phase handles callbacks for some system operations such as types of TCP errors.',
-      'If a TCP socket receives ECONNREFUSED when attempting to connect, some *nix systems want to wait to report the error.',
-      'It is rarely relevant for typical app logic but critical for system stability.'
+      'This is deliberate Libuv design: the OS requires an extra tick to finalize certain error states before reporting them.',
+      'TCP ECONNREFUSED is the canonical example — some *nix systems finalize the error state asynchronously after the current iteration ends.',
+      'Rarely encountered in application code directly, but critical for low-level network library authors handling raw socket errors.'
     ],
     color: 'text-purple-400',
     icon: <Activity className="w-5 h-5" />,
     code: `// Internal system callbacks\n// e.g., TCP connection errors`
+  },
+  {
+    id: 'idle-prepare',
+    name: 'Idle / Prepare',
+    description: 'Internal Libuv phase — no user-facing API. Runs registered idle and prepare handles before I/O polling begins.',
+    details: [
+      'No JavaScript API exists for this phase — it is entirely internal to Libuv.',
+      'Node.js uses the prepare hook to track outstanding async operations and manage loop lifecycle.',
+      'Shown here for completeness: the official event loop has 6 phases, not 5.'
+    ],
+    seniorInsights: [
+      'uv__run_idle() and uv__run_prepare() iterate their handle lists in sequence before the Poll phase.',
+      'Node.js registers a prepare handle (node::BeforeExit) to determine whether the loop should keep running or exit.',
+      'If you read Libuv source (src/unix/core.c), UV_RUN_DEFAULT loops through all 6 phase groups including idle/prepare.'
+    ],
+    color: 'text-white/30',
+    icon: <Layers className="w-5 h-5" />,
+    code: `// No user-facing API for this phase.\n// Libuv prepare handles run here.\n// Node uses it internally to decide\n// whether the loop should continue.`
   },
   {
     id: 'poll',
@@ -167,9 +189,10 @@ const EVENT_LOOP_PHASES: Phase[] = [
       'Always runs after the Poll phase.'
     ],
     seniorInsights: [
-      'setImmediate() is technically a "check" phase timer.',
-      'If called from within an I/O cycle, setImmediate() will always run before any setTimeout().',
-      'It is often preferred over setTimeout(fn, 0) because it avoids the timer heap overhead.'
+      'setImmediate() is NOT a timer — callbacks sit in a simple FIFO check queue, not the timer min-heap.',
+      'If called from within an I/O callback, setImmediate() always runs before any pending setTimeout() that iteration.',
+      'Preferred over setTimeout(fn, 0): no O(log n) min-heap insertion, no threshold comparison — it just queues.',
+      'Safe for recursive async work: each call yields back to the event loop, unlike nextTick() which can starve it.'
     ],
     color: 'text-green-400',
     icon: <ShieldCheck className="w-5 h-5" />,
@@ -480,22 +503,40 @@ export default function App() {
     addLog(`📍 Entering ${activePhase.name} phase...`, 'phase', 1500);
     
     if (activePhase.id === 'timers') {
-      addLog('🔍 Checking timer heap...', 'info', 2000);
-      addLog('✅ Found expired timer: 100ms', 'success', 2500);
+      addLog('🔍 Inspecting min-heap for expired timers...', 'info', 2000);
+      addLog('✅ Timer threshold reached: 100ms ≥ 100ms', 'success', 2500);
       addLog('📝 Executing: console.log("Timer expired!")', 'code', 3000);
       addLog('> Timer expired!', 'output', 3200);
+      addLog('🔄 nextTick + Promise queues drained before next phase.', 'info', 3600);
+    } else if (activePhase.id === 'pending') {
+      addLog('🔍 Checking deferred OS callback queue...', 'info', 2000);
+      addLog('⚠️  Found: TCP ECONNREFUSED (deferred from prev. iteration)', 'info', 2500);
+      addLog('📝 Executing: socket error callback...', 'code', 3000);
+      addLog('> Error: connect ECONNREFUSED 127.0.0.1:3000', 'output', 3200);
+    } else if (activePhase.id === 'idle-prepare') {
+      addLog('⚙️  Running Libuv prepare handles...', 'info', 2000);
+      addLog('📊 node::BeforeExit — checking pending async ops...', 'info', 2500);
+      addLog('✅ Async ops still pending — loop continues.', 'success', 3000);
+      addLog('➡️  Handing off to Poll phase.', 'info', 3200);
     } else if (activePhase.id === 'poll') {
-      addLog('📡 Polling for I/O events...', 'info', 2000);
-      addLog('📥 Received event: fs.readFile complete', 'success', 2500);
-      addLog('📝 Executing callback...', 'code', 3000);
+      addLog('📡 Calling epoll_wait() / kqueue — blocking for I/O...', 'info', 2000);
+      addLog('📥 Kernel event received: fs.readFile complete', 'success', 2500);
+      addLog('📝 Executing I/O callback...', 'code', 3000);
       addLog('> File read complete!', 'output', 3200);
+      addLog('🔄 nextTick + Promise queues drained before Check phase.', 'info', 3600);
     } else if (activePhase.id === 'check') {
-      addLog('🔍 Checking immediate queue...', 'info', 2000);
-      addLog('✅ Found setImmediate callback', 'success', 2500);
+      addLog('🔍 Inspecting setImmediate FIFO queue...', 'info', 2000);
+      addLog('✅ Found setImmediate callback (no heap lookup needed)', 'success', 2500);
       addLog('📝 Executing: console.log("Immediate execution!")', 'code', 3000);
       addLog('> Immediate execution!', 'output', 3200);
+    } else if (activePhase.id === 'close') {
+      addLog('🔌 Checking close callback queue...', 'info', 2000);
+      addLog('✅ Found: socket "close" event (abrupt destroy)', 'success', 2500);
+      addLog('📝 Executing: socket.on("close", cb)', 'code', 3000);
+      addLog('> Socket closed — resources cleaned up.', 'output', 3200);
+      addLog('🔄 Loop iteration complete. Returning to Timers phase.', 'info', 3600);
     } else {
-      addLog('ℹ️ Processing internal callbacks...', 'info', 2000);
+      addLog('ℹ️  Processing phase callbacks...', 'info', 2000);
       addLog('✅ Phase complete.', 'success', 2500);
     }
 
@@ -1010,18 +1051,41 @@ export default function App() {
                 <h2 className="text-2xl md:text-4xl font-black tracking-tight">The Microtask Nuance</h2>
               </div>
               <p className="text-base md:text-lg text-white/50 mb-6 md:mb-8 leading-relaxed">
-                Senior developers know that <code className="text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded">process.nextTick()</code> is 
-                NOT part of the event loop. It's a post-operation hook that executes immediately after the current operation.
+                <code className="text-yellow-400 bg-yellow-400/10 px-2 py-1 rounded">process.nextTick()</code> and{' '}
+                <code className="text-blue-400 bg-blue-400/10 px-2 py-1 rounded">Promise</code> callbacks are{' '}
+                <span className="text-white/70 font-medium">not part of the event loop</span> — they are microtask hooks that drain between{' '}
+                <span className="text-white/70 italic">every single phase</span>, including after each individual callback since Node.js 11.
               </p>
-              
+
               <div className="space-y-4 md:space-y-6">
+                <div className="p-4 md:p-6 rounded-2xl bg-green-500/5 border border-green-500/20 hover:border-green-400/40 transition-colors">
+                  <h4 className="font-bold text-green-400 mb-2 md:mb-3 flex items-center gap-2 text-sm md:text-base">
+                    <RefreshCw className="w-4 h-4 md:w-5 md:h-5" /> Runs Between Every Phase
+                  </h4>
+                  <p className="text-xs md:text-sm text-white/60 leading-relaxed mb-3">
+                    The correct mental model for a single loop iteration:
+                  </p>
+                  <div className="font-mono text-[10px] md:text-xs space-y-1 text-white/50">
+                    {[
+                      ['Phase executes one callback', 'text-white/70'],
+                      ['→ drain nextTick queue', 'text-yellow-400/80'],
+                      ['→ drain Promise microtask queue', 'text-blue-400/80'],
+                      ['Next callback or next phase', 'text-white/70'],
+                      ['→ drain nextTick queue', 'text-yellow-400/80'],
+                      ['→ drain Promise microtask queue', 'text-blue-400/80'],
+                      ['…repeat until phase is empty', 'text-white/30'],
+                    ].map(([line, cls], i) => (
+                      <div key={i} className={`${cls} pl-${line.startsWith('→') ? '4' : '0'}`}>{line}</div>
+                    ))}
+                  </div>
+                </div>
                 <div className="p-4 md:p-6 rounded-2xl bg-white/5 border border-white/10 hover:border-yellow-400/30 transition-colors">
                   <h4 className="font-bold text-yellow-400 mb-2 md:mb-3 flex items-center gap-2 text-sm md:text-base">
                     <AlertCircle className="w-4 h-4 md:w-5 md:h-5" /> Event Loop Starvation
                   </h4>
                   <p className="text-xs md:text-sm text-white/60 leading-relaxed">
-                    If you recursively call <code className="text-yellow-400">nextTick</code>, Node.js will keep processing that queue 
-                    and never reach the next phase of the event loop.
+                    Because nextTick drains between <em>every callback</em>, recursively calling{' '}
+                    <code className="text-yellow-400">nextTick</code> prevents the loop from ever advancing to the next phase — regardless of which phase it's currently in.
                   </p>
                 </div>
                 <div className="p-4 md:p-6 rounded-2xl bg-white/5 border border-white/10 hover:border-blue-400/30 transition-colors">
