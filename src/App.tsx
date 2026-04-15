@@ -194,6 +194,212 @@ const EVENT_LOOP_PHASES: Phase[] = [
   }
 ];
 
+// --- Helpers ---
+
+function highlightJS(code: string): React.ReactNode[] {
+  const tokens: { text: string; cls: string }[] = [];
+  const regex = /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)|(\b(?:const|let|var|function|return|if|else|new|this|class|import|export|from|async|await|of|in|typeof|void)\b)|(\/\/[^\n]*)|(\/\*[\s\S]*?\*\/)/g;
+  const builtinRegex = /\b(process|setTimeout|setInterval|setImmediate|Promise|console|fs|socket|require|module)\b/g;
+  const literalRegex = /\b(true|false|null|undefined)\b/g;
+  const numberRegex = /\b(\d+)\b/g;
+
+  // Run all regexes together via a combined pattern
+  const combined = new RegExp(
+    [
+      /("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|`(?:[^`\\]|\\.)*`)/.source,     // [1] strings
+      /(\b(?:const|let|var|function|return|if|else|new|this|class|import|export|from|async|await|of|in|typeof|void)\b)/.source, // [2] keywords
+      /(\/\/[^\n]*)/.source,                                                   // [3] line comment
+      /(\/\*[\s\S]*?\*\/)/.source,                                             // [4] block comment
+      /\b(process|setTimeout|setInterval|setImmediate|Promise|console|fs|socket|require|module)\b/.source, // [5] builtins
+      /\b(true|false|null|undefined)\b/.source,                               // [6] literals
+      /\b(\d+)\b/.source,                                                      // [7] numbers
+    ].join('|'),
+    'g'
+  );
+
+  // suppress unused var warnings
+  void regex; void builtinRegex; void literalRegex; void numberRegex;
+
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = combined.exec(code)) !== null) {
+    if (m.index > last) tokens.push({ text: code.slice(last, m.index), cls: 'text-white/70' });
+    if      (m[1]) tokens.push({ text: m[0], cls: 'text-emerald-300' });
+    else if (m[2]) tokens.push({ text: m[0], cls: 'text-purple-400' });
+    else if (m[3] || m[4]) tokens.push({ text: m[0], cls: 'text-white/30 italic' });
+    else if (m[5]) tokens.push({ text: m[0], cls: 'text-yellow-300' });
+    else if (m[6]) tokens.push({ text: m[0], cls: 'text-blue-400' });
+    else if (m[7]) tokens.push({ text: m[0], cls: 'text-orange-400' });
+    else tokens.push({ text: m[0], cls: 'text-white/70' });
+    last = m.index + m[0].length;
+  }
+  if (last < code.length) tokens.push({ text: code.slice(last), cls: 'text-white/70' });
+  return tokens.map((t, i) => <span key={i} className={t.cls}>{t.text}</span>);
+}
+
+// --- Sub-components ---
+
+const NAV_LINKS = [
+  { id: 'architecture', label: '01 Architecture' },
+  { id: 'event-loop',   label: '02 Event Loop'   },
+  { id: 'microtasks',   label: '03 Microtasks'   },
+];
+
+const StickyNav = ({ scrollToSection }: { scrollToSection: (id: string) => void }) => {
+  const [activeId, setActiveId] = useState<string>('architecture');
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) setActiveId(entry.target.id);
+        });
+      },
+      { rootMargin: '-30% 0px -60% 0px' }
+    );
+    NAV_LINKS.forEach(({ id }) => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  return (
+    <nav className="sticky top-0 z-50 border-b border-white/10 bg-[#0a0a0a]/80 backdrop-blur-md">
+      <div className="max-w-6xl mx-auto px-4 md:px-12 h-12 flex items-center gap-4">
+        <div className="flex items-center gap-2 mr-auto">
+          <RefreshCw className="w-3.5 h-3.5 text-green-500 animate-spin-slow" />
+          <span className="hidden sm:block text-[10px] font-mono text-white/30 uppercase tracking-[0.25em]">
+            Node.js Internals
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          {NAV_LINKS.map(({ id, label }) => (
+            <button
+              key={id}
+              onClick={() => scrollToSection(id)}
+              className={`px-3 py-1.5 rounded-lg text-[10px] md:text-xs font-bold uppercase tracking-wider transition-all ${
+                activeId === id
+                  ? 'bg-white/10 text-white'
+                  : 'text-white/40 hover:text-white/70 hover:bg-white/5'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+    </nav>
+  );
+};
+
+const MICROTASK_QUEUES = [
+  {
+    label: 'process.nextTick Queue',
+    badge: 'Priority 1 — Highest',
+    border: 'border-yellow-400/30',
+    bg: 'bg-yellow-400/5',
+    textColor: 'text-yellow-400',
+    badgeStyle: 'bg-yellow-400 text-black',
+    itemStyle: 'text-yellow-200/60 border-yellow-400/20',
+    dividerColor: 'bg-yellow-400/30',
+    items: ['process.nextTick(fn)', 'nextTick(fn)', '…drains completely first'],
+  },
+  {
+    label: 'Promise Microtask Queue',
+    badge: 'Priority 2',
+    border: 'border-blue-400/30',
+    bg: 'bg-blue-400/5',
+    textColor: 'text-blue-400',
+    badgeStyle: 'bg-blue-500 text-white',
+    itemStyle: 'text-blue-200/60 border-blue-400/20',
+    dividerColor: 'bg-blue-400/30',
+    items: ['Promise.then()', '.catch()', '.finally()', 'queueMicrotask(fn)'],
+  },
+  {
+    label: 'Event Loop — Macrotasks',
+    badge: 'Priority 3 — Normal',
+    border: 'border-white/15',
+    bg: 'bg-white/5',
+    textColor: 'text-white/70',
+    badgeStyle: 'bg-white/15 text-white/60',
+    itemStyle: 'text-white/40 border-white/10',
+    dividerColor: 'bg-white/20',
+    items: ['setTimeout / setInterval', 'setImmediate', 'I/O callbacks'],
+  },
+];
+
+const MicrotaskQueues = () => (
+  <div className="space-y-1">
+    {MICROTASK_QUEUES.map((q, i) => (
+      <div key={q.label}>
+        <motion.div
+          initial={{ opacity: 0, x: -10 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ delay: i * 0.1 }}
+          className={`rounded-xl border p-3 md:p-4 ${q.border} ${q.bg}`}
+        >
+          <div className="flex items-center justify-between mb-2.5">
+            <span className={`text-xs font-bold ${q.textColor}`}>{q.label}</span>
+            <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider ${q.badgeStyle}`}>
+              {q.badge}
+            </span>
+          </div>
+          <div className="flex gap-1.5 flex-wrap">
+            {q.items.map((item) => (
+              <span key={item} className={`text-[10px] font-mono px-2 py-1 rounded-md bg-black/30 border ${q.itemStyle}`}>
+                {item}
+              </span>
+            ))}
+          </div>
+        </motion.div>
+        {i < MICROTASK_QUEUES.length - 1 && (
+          <div className="flex justify-center py-0.5">
+            <div className="flex flex-col items-center gap-0.5">
+              <div className={`w-px h-3 ${q.dividerColor}`} />
+              <ArrowRight className="w-2.5 h-2.5 text-white/20 rotate-90" />
+              <span className="text-[9px] text-white/20 font-mono">drains first</span>
+            </div>
+          </div>
+        )}
+      </div>
+    ))}
+  </div>
+);
+
+const EXECUTION_ORDER = [
+  { step: '1', label: 'Synchronous Code',        sub: 'call stack runs to empty',      textCls: 'text-white',       borderCls: 'border-white/20',       bgCls: 'bg-white/5'        },
+  { step: '2', label: 'process.nextTick()',       sub: 'entire queue drains first',     textCls: 'text-yellow-400',  borderCls: 'border-yellow-400/30',  bgCls: 'bg-yellow-400/5'   },
+  { step: '3', label: 'Promise callbacks',        sub: '.then / .catch / .finally',     textCls: 'text-blue-400',    borderCls: 'border-blue-400/30',    bgCls: 'bg-blue-400/5'     },
+  { step: '4', label: 'setTimeout / setInterval', sub: 'Timers phase (macrotask)',      textCls: 'text-orange-400',  borderCls: 'border-orange-400/30',  bgCls: 'bg-orange-400/5'   },
+  { step: '5', label: 'setImmediate()',           sub: 'Check phase — after I/O poll',  textCls: 'text-green-400',   borderCls: 'border-green-400/30',   bgCls: 'bg-green-400/5'    },
+];
+
+const ExecutionOrderCard = () => (
+  <div className="bg-white/5 rounded-2xl border border-white/10 p-5 md:p-6">
+    <div className="flex items-center gap-2 mb-4">
+      <ArrowRight className="w-4 h-4 text-green-400" />
+      <span className="text-xs font-black uppercase tracking-widest text-white/50">Execution Order</span>
+    </div>
+    <div className="space-y-1.5">
+      {EXECUTION_ORDER.map(({ step, label, sub, textCls, borderCls, bgCls }, i) => (
+        <React.Fragment key={step}>
+          <div className={`flex items-center gap-3 p-2.5 rounded-xl border font-mono ${borderCls} ${bgCls}`}>
+            <span className={`text-[10px] font-black w-5 text-center opacity-50 shrink-0 ${textCls}`}>{step}</span>
+            <div className="flex-1 min-w-0">
+              <p className={`text-xs font-bold truncate ${textCls}`}>{label}</p>
+              <p className="text-[10px] text-white/30 truncate">{sub}</p>
+            </div>
+          </div>
+          {i < EXECUTION_ORDER.length - 1 && (
+            <div className="pl-4 text-white/15 text-xs font-mono leading-none">↓</div>
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  </div>
+);
+
 // --- Components ---
 
 const EventLoopPhase = ({ phase, isActive, onClick }: { phase: Phase, isActive: boolean, onClick: () => void, key?: string }) => (
@@ -362,6 +568,8 @@ export default function App() {
           </motion.p>
         </div>
       </header>
+
+      <StickyNav scrollToSection={scrollToSection} />
 
       <main className="max-w-6xl mx-auto px-4 md:px-12 py-12 md:py-20 space-y-20 md:space-y-32">
         
@@ -591,7 +799,7 @@ export default function App() {
 
           <div className="flex flex-col md:grid md:grid-cols-12 gap-6 md:gap-12">
             {/* Phase List - Horizontal on Mobile, Vertical on Desktop */}
-            <div className="md:col-span-3 md:sticky md:top-12 self-start z-40">
+            <div className="md:col-span-3 md:sticky md:top-16 self-start z-40">
               <div className="flex md:flex-col gap-2 overflow-x-auto md:overflow-x-visible pb-4 md:pb-0 scrollbar-hide">
                 {EVENT_LOOP_PHASES.map((phase, i) => (
                   <div key={phase.id} className="shrink-0 md:shrink w-40 md:w-full">
@@ -696,8 +904,8 @@ export default function App() {
                         </button>
                       </div>
                       <div className="p-4 md:p-6 font-mono text-xs md:text-sm leading-relaxed overflow-x-auto scrollbar-hide">
-                        <pre className="text-white/80">
-                          {activePhase.code}
+                        <pre className="leading-relaxed whitespace-pre-wrap">
+                          {highlightJS(activePhase.code)}
                         </pre>
                       </div>
                     </div>
@@ -817,36 +1025,25 @@ export default function App() {
                   </p>
                 </div>
                 <div className="p-4 md:p-6 rounded-2xl bg-white/5 border border-white/10 hover:border-blue-400/30 transition-colors">
-                  <h4 className="font-bold text-blue-400 mb-2 md:mb-3 flex items-center gap-2 text-sm md:text-base">
+                  <h4 className="font-bold text-blue-400 mb-3 md:mb-4 flex items-center gap-2 text-sm md:text-base">
                     <Info className="w-4 h-4 md:w-5 md:h-5" /> Microtask Queue Priority
                   </h4>
-                  <ol className="text-[10px] md:text-sm text-white/60 space-y-1 md:space-y-2 list-decimal list-inside">
-                    <li><span className="text-yellow-400">nextTick Queue</span> (Highest)</li>
-                    <li><span className="text-blue-400">Promise Queue</span> (then/catch/finally)</li>
-                    <li>Event Loop Phases (Macrotasks)</li>
-                  </ol>
+                  <MicrotaskQueues />
                 </div>
               </div>
             </div>
             
-            <div className="bg-black/40 rounded-2xl md:rounded-3xl border border-white/10 p-6 md:p-8 font-mono text-xs md:text-sm relative group overflow-x-auto scrollbar-hide">
-              <div className="absolute top-2 right-2 md:-top-4 md:-right-4 bg-yellow-400 text-black px-2 py-0.5 md:px-3 md:py-1 rounded-lg text-[8px] md:text-[10px] font-black tracking-widest shadow-xl">DANGER ZONE</div>
-              <pre className="text-white/80 leading-relaxed">
-{`function starve() {
-  // This will block the loop FOREVER
-  process.nextTick(starve);
-}
-
-// Event loop will never reach here
-setTimeout(() => {
-  console.log('This will never run');
-}, 100);
-
-starve();`}
-              </pre>
-              <div className="mt-4 md:mt-6 p-3 md:p-4 rounded-xl bg-yellow-400/10 border border-yellow-400/20 text-xs md:text-sm text-yellow-200/60 italic">
-                "A lead engineer uses setImmediate() for recursive async tasks to allow the loop to breathe."
+            <div className="space-y-6 md:space-y-8">
+              <div className="bg-black/40 rounded-2xl md:rounded-3xl border border-white/10 p-6 md:p-8 font-mono text-xs md:text-sm relative group overflow-x-auto scrollbar-hide">
+                <div className="absolute top-2 right-2 md:-top-4 md:-right-4 bg-yellow-400 text-black px-2 py-0.5 md:px-3 md:py-1 rounded-lg text-[8px] md:text-[10px] font-black tracking-widest shadow-xl">DANGER ZONE</div>
+                <pre className="leading-relaxed whitespace-pre-wrap">
+                  {highlightJS(`function starve() {\n  // This will block the loop FOREVER\n  process.nextTick(starve);\n}\n\n// Event loop will never reach here\nsetTimeout(() => {\n  console.log('This will never run');\n}, 100);\n\nstarve();`)}
+                </pre>
+                <div className="mt-4 md:mt-6 p-3 md:p-4 rounded-xl bg-yellow-400/10 border border-yellow-400/20 text-xs md:text-sm text-yellow-200/60 italic">
+                  "A lead engineer uses setImmediate() for recursive async tasks to allow the loop to breathe."
+                </div>
               </div>
+              <ExecutionOrderCard />
             </div>
           </div>
 
