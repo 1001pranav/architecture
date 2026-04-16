@@ -5,6 +5,8 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { HeroScene } from './components/HeroScene';
+import { EventLoop3D } from './components/EventLoop3D';
 import { 
   Cpu, 
   Layers, 
@@ -460,17 +462,6 @@ export default function App() {
   const [loopIndex, setLoopIndex] = useState(0);
   const [isAutoLooping, setIsAutoLooping] = useState(true);
   const [logs, setLogs] = useState<{ msg: string; type: string }[]>([]);
-  const [radius, setRadius] = useState(140);
-
-  // Update radius based on window size
-  useEffect(() => {
-    const updateRadius = () => {
-      setRadius(window.innerWidth < 640 ? 100 : 140);
-    };
-    updateRadius();
-    window.addEventListener('resize', updateRadius);
-    return () => window.removeEventListener('resize', updateRadius);
-  }, []);
   const [isExecuting, setIsExecuting] = useState(false);
   const [selectedArchPart, setSelectedArchPart] = useState<ArchPart | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -570,45 +561,96 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-purple-500/30">
-      {/* Header */}
-      <header id="top" className="border-b border-white/10 py-8 md:py-12 px-4 md:px-12 bg-gradient-to-b from-white/5 to-transparent relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-1/2 h-full bg-gradient-to-l from-green-500/5 to-transparent pointer-events-none" />
-        <div className="max-w-6xl mx-auto relative z-10">
-          <motion.div 
-            initial={{ opacity: 0, y: -20 }}
+
+      {/* ─── HERO: Full-screen 3D cinematic landing ─────────────────────────── */}
+      <section id="top" className="relative h-screen overflow-hidden bg-black">
+        <HeroScene />
+
+        {/* Text overlay */}
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10 px-6">
+          <motion.div
+            initial={{ opacity: 0, y: 40 }}
             animate={{ opacity: 1, y: 0 }}
-            className="flex items-center gap-3 mb-4 md:mb-6"
+            transition={{ duration: 1.1, ease: 'easeOut' }}
+            className="text-center"
           >
-            <div className="p-2 md:p-3 rounded-xl bg-green-500/20 text-green-500 border border-green-500/30 shadow-[0_0_20px_rgba(34,197,94,0.2)]">
-              <RefreshCw className="w-6 h-6 md:w-8 md:h-8 animate-spin-slow" />
-            </div>
-            <div>
-              <span className="text-[10px] font-mono uppercase tracking-[0.3em] text-green-500/60 block mb-1">Senior Engineering Guide</span>
-              <h2 className="text-[10px] md:text-sm font-bold text-white/40">NODE_ENV=production</h2>
-            </div>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.3 }}
+              className="text-green-400 font-mono text-[10px] md:text-xs tracking-[0.45em] uppercase mb-5"
+            >
+              ◉ &nbsp;Node.js Internals &nbsp;◉
+            </motion.div>
+
+            <h1 className="text-5xl sm:text-7xl md:text-8xl lg:text-[9rem] font-black tracking-tighter leading-[0.85] mb-6">
+              THE{' '}
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-green-400 via-emerald-300 to-blue-500">
+                EVENT LOOP
+              </span>
+              <br />
+              <span className="text-white/12">UNMASKED</span>
+            </h1>
+
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 0.6 }}
+              className="text-white/40 text-sm md:text-lg max-w-xl mx-auto leading-relaxed font-light mb-10"
+            >
+              An interactive 3D journey through Node.js architecture —
+              from the V8 engine to Libuv's event loop.
+            </motion.p>
+
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.9 }}
+              className="pointer-events-auto flex flex-col items-center gap-4"
+            >
+              <button
+                onClick={() => scrollToSection('architecture')}
+                className="px-8 py-3 rounded-full border border-green-500/40 text-green-400 text-xs font-mono tracking-[0.3em] uppercase hover:bg-green-500/10 hover:border-green-400/70 transition-all duration-300"
+              >
+                Begin Journey
+              </button>
+              <motion.div
+                animate={{ y: [0, 8, 0] }}
+                transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                className="text-white/20 text-xl"
+              >
+                ↓
+              </motion.div>
+            </motion.div>
           </motion.div>
-          
-          <motion.h1 
-            initial={{ opacity: 0, x: -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.1 }}
-            className="text-3xl xs:text-4xl sm:text-5xl md:text-6xl lg:text-8xl font-black tracking-tighter mb-4 md:mb-6 leading-[0.9] break-words"
-          >
-            THE <span className="text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">EVENT LOOP</span> <br />
-            <span className="text-white/20">UNMASKED</span>
-          </motion.h1>
-          
-          <motion.p 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.2 }}
-            className="text-base md:text-xl text-white/50 max-w-3xl leading-relaxed font-light"
-          >
-            A deep dive into the asynchronous heart of Node.js. Beyond the basics: understanding Libuv, 
-            thread pools, and the precise mechanics of phase transitions.
-          </motion.p>
         </div>
-      </header>
+
+        {/* Floating labels for the 4 architecture components */}
+        <div className="absolute inset-0 pointer-events-none z-10">
+          {[
+            { label: 'V8 Engine',      sub: 'JavaScript Runtime',  pos: 'top-[18%] right-[10%]', color: 'text-blue-400',   border: 'border-blue-500/30',   bg: 'bg-blue-500/5'   },
+            { label: 'Node Bindings',  sub: 'C++ Bridge',          pos: 'top-[22%] left-[8%]',   color: 'text-emerald-400',border: 'border-emerald-500/30',bg: 'bg-emerald-500/5'},
+            { label: 'Libuv',          sub: 'Event Loop Core',     pos: 'bottom-[28%] left-[8%]',color: 'text-purple-400', border: 'border-purple-500/30', bg: 'bg-purple-500/5' },
+            { label: 'Thread Pool',    sub: 'UV_THREADPOOL_SIZE=4', pos: 'bottom-[24%] right-[9%]',color:'text-orange-400', border: 'border-orange-500/30', bg: 'bg-orange-500/5' },
+          ].map(({ label, sub, pos, color, border, bg }) => (
+            <motion.div
+              key={label}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 1.4 }}
+              className={`absolute hidden md:block ${pos}`}
+            >
+              <div className={`px-3 py-2 rounded-xl border ${border} ${bg} backdrop-blur-sm`}>
+                <div className={`text-[10px] font-black tracking-widest uppercase ${color}`}>{label}</div>
+                <div className="text-[9px] text-white/30 font-mono mt-0.5">{sub}</div>
+              </div>
+            </motion.div>
+          ))}
+        </div>
+
+        {/* Bottom fade into next section */}
+        <div className="absolute bottom-0 left-0 right-0 h-40 bg-gradient-to-t from-[#0a0a0a] to-transparent pointer-events-none z-20" />
+      </section>
 
       <StickyNav scrollToSection={scrollToSection} />
 
@@ -863,69 +905,37 @@ export default function App() {
                 <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-white/10 to-transparent" />
                 
                 <div className="grid md:grid-cols-2 gap-8 md:gap-12 items-center">
-                  {/* Circular Visualization */}
-                  <div className="relative aspect-square flex items-center justify-center scale-[0.65] xs:scale-75 sm:scale-90 md:scale-100">
-                    {/* Rotating Background Rings */}
-                    <div className="absolute w-full h-full border border-dashed border-white/5 rounded-full animate-spin-slow" />
-                    <div className="absolute w-3/4 h-3/4 border border-white/5 rounded-full" />
-                    
-                    {/* Active Phase Pointer/Scanner */}
-                    <motion.div 
-                      className="absolute inset-0 z-10 pointer-events-none"
-                      animate={{ rotate: (loopIndex / EVENT_LOOP_PHASES.length) * 360 }}
-                      transition={{ type: 'spring', stiffness: 50, damping: 15 }}
-                    >
-                      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1 h-1/2 bg-gradient-to-b from-green-500/50 to-transparent blur-sm" />
-                      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-8 bg-green-500/20 rounded-full blur-xl" />
-                    </motion.div>
-
-                    {EVENT_LOOP_PHASES.map((phase, i) => {
-                      const angle = (i / EVENT_LOOP_PHASES.length) * Math.PI * 2 - Math.PI / 2;
-                      const x = Math.cos(angle) * radius;
-                      const y = Math.sin(angle) * radius;
-                      
-                      return (
-                        <motion.button
-                          key={phase.id}
-                          className="absolute z-30"
-                          onClick={() => {
-                            setLoopIndex(i);
-                            setIsAutoLooping(false);
-                          }}
-                          whileHover={{ scale: 1.2 }}
-                          whileTap={{ scale: 0.9 }}
-                          animate={{
-                            x: x,
-                            y: y,
-                            scale: activePhase.id === phase.id ? 1.3 : 1,
-                            opacity: activePhase.id === phase.id ? 1 : 0.4
-                          }}
+                  {/* ── 3D Event Loop Torus ───────────────────────────────── */}
+                  <div className="relative w-full rounded-2xl overflow-hidden" style={{ height: '420px' }}>
+                    <EventLoop3D
+                      activeIndex={loopIndex}
+                      onPhaseClick={(i) => {
+                        setLoopIndex(i);
+                        setIsAutoLooping(false);
+                      }}
+                    />
+                    {/* Active phase name overlay at bottom of canvas */}
+                    <div className="absolute inset-x-0 bottom-0 flex flex-col items-center pb-4 pointer-events-none z-10">
+                      <AnimatePresence mode="wait">
+                        <motion.div
+                          key={activePhase.id}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          exit={{ opacity: 0, y: -8 }}
+                          transition={{ duration: 0.3 }}
+                          className="text-center"
                         >
-                          <div className={`p-2.5 sm:p-3 md:p-4 rounded-xl md:rounded-2xl bg-black border-2 shadow-2xl transition-colors ${activePhase.id === phase.id ? 'border-white' : 'border-white/10 hover:border-white/30'} ${phase.color}`}>
-                            {React.cloneElement(phase.icon as React.ReactElement, { className: 'w-4 h-4 sm:w-5 sm:h-5 md:w-6 md:h-6' })}
-                          </div>
-                          {activePhase.id === phase.id && (
-                            <motion.div 
-                              layoutId="phase-glow"
-                              className="absolute inset-0 rounded-xl md:rounded-2xl bg-current opacity-20 blur-xl"
-                            />
-                          )}
-                        </motion.button>
-                      );
-                    })}
-
-                    <AnimatePresence mode="wait">
-                      <motion.div
-                        key={activePhase.id}
-                        initial={{ opacity: 0, scale: 0.8 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        exit={{ opacity: 0, scale: 1.2 }}
-                        className="z-20 text-center px-2 sm:px-4"
-                      >
-                        <h3 className={`text-lg sm:text-2xl md:text-4xl font-black mb-1 sm:mb-2 tracking-tighter leading-tight ${activePhase.color}`}>{activePhase.name}</h3>
-                        <div className="h-0.5 sm:h-1 w-6 sm:w-12 bg-white/20 mx-auto rounded-full" />
-                      </motion.div>
-                    </AnimatePresence>
+                          <h3 className={`text-2xl md:text-3xl font-black tracking-tighter ${activePhase.color}`}>
+                            {activePhase.name}
+                          </h3>
+                          <p className="text-white/35 text-[10px] font-mono mt-0.5 tracking-wider uppercase">
+                            click a node · auto-advancing
+                          </p>
+                        </motion.div>
+                      </AnimatePresence>
+                    </div>
+                    {/* Subtle vignette edges */}
+                    <div className="absolute inset-0 pointer-events-none rounded-2xl shadow-[inset_0_0_60px_rgba(0,0,0,0.7)]" />
                   </div>
 
                   {/* Code & Insights */}
